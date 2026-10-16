@@ -38,10 +38,21 @@ class ConsoleUI
     // CHEAT
 
     private const string SecretCode = "cheat";
+    private const string CheatColor = "\u001b[38;5;117m";
+
+    private const int HelpWidth = 55;
+    private const int HelpTopRow = 3;
 
     private bool cheatEnabled;
     private string typedLetters = "";
     private Action? rebuildFrame;
+
+    private bool awaitingMove;
+    private bool insuranceQuestion;
+
+    private List<Card> seenCards = new List<Card>();
+    private Card? lastCountedCard;
+    private bool lastCardWasHoleCard;
 
     // =========================================================
     // START / STOP
@@ -176,17 +187,19 @@ class ConsoleUI
     {
         StartFrame();
 
-        ShowTableArea(game);
+        ShowTableArea(game, true);
 
         AddFeltLine('=');
-        AddLine(
-            CenterText(
-                cheatEnabled
-                    ? CardCounter.GetSummaryLine(game, false)
-                    : "PLAYER",
-                TableWidth
-            )
-        );
+
+        if (cheatEnabled)
+        {
+            AddCheatLine(CardCounter.GetBetLine(game));
+        }
+        else
+        {
+            AddLine(CenterText("PLAYER", TableWidth));
+        }
+
         AddFeltLine('─');
 
         AddLine(
@@ -326,18 +339,18 @@ class ConsoleUI
         {
             StartFrame();
 
-            ShowTableArea(game);
+            ShowTableArea(game, true);
 
             AddFeltLine('=');
 
-            AddLine(
-                CenterText(
-                    cheatEnabled
-                        ? CardCounter.GetSummaryLine(game, false)
-                        : "PLACE BET",
-                    TableWidth
-                )
-            );
+            if (cheatEnabled)
+            {
+                AddCheatLine(CardCounter.GetBetLine(game));
+            }
+            else
+            {
+                AddLine(CenterText("PLACE BET", TableWidth));
+            }
 
             AddFeltLine('─');
 
@@ -461,23 +474,32 @@ class ConsoleUI
     {
         StartFrame();
 
-        ShowTableArea(game);
+        TrackCountedCards(game);
+
+        ShowTableArea(game, false);
 
         ShowPlayerStatus(game);
     }
 
-    private void ShowTableArea(Game game)
+    private void ShowTableArea(Game game, bool betting)
     {
         // DEALER
 
         AddFeltLine('=');
 
-        AddLine(
-            CenterText(
-                "DEALER",
-                TableWidth
-            )
-        );
+        if (cheatEnabled)
+        {
+            AddCheatLine(CardCounter.GetStatsLine(game));
+        }
+        else
+        {
+            AddLine(
+                CenterText(
+                    "DEALER",
+                    TableWidth
+                )
+            );
+        }
 
         AddFeltLine('=');
 
@@ -526,7 +548,9 @@ class ConsoleUI
 
         // COMMENT AREA
 
-        ShowDealerMessage();
+        ShowDealerMessage(
+            cheatEnabled ? GetCheatNote(game, betting) : ""
+        );
 
         AddLine();
     }
@@ -545,10 +569,14 @@ class ConsoleUI
         dealerMessage = "";
     }
 
-    private void ShowDealerMessage()
+    private void ShowDealerMessage(string cheatNote)
     {
         string[] messageLines =
             WrapDealerMessage(dealerMessage);
+
+        bool showCheatNote =
+            cheatNote != "" &&
+            messageLines[DealerMessageLines - 1] == "";
 
         string top =
             "┌" +
@@ -569,6 +597,23 @@ class ConsoleUI
 
         for (int i = 0; i < DealerMessageLines; i++)
         {
+            if (showCheatNote && i == DealerMessageLines - 1)
+            {
+                AddLine(
+                    new string(
+                        ' ',
+                        (TableWidth - (DealerMessageWidth + 2)) / 2
+                    ) +
+                    "│" +
+                    CheatColor +
+                    Fit(cheatNote, DealerMessageWidth) +
+                    DefaultColor +
+                    "│"
+                );
+
+                continue;
+            }
+
             string middle =
                 "│" +
                 CenterText(
@@ -687,33 +732,42 @@ class ConsoleUI
     {
         int selectedIndex = 1;
 
+        SetCheatState(ref insuranceQuestion, true);
+
         FlushInput();
 
-        while (true)
+        try
         {
-            string line =
-                selectedIndex == 0
-                    ? "> YES <     NO"
-                    : "YES     > NO <";
-
-            PresentWithSelection(line);
-
-            ConsoleKey key = ReadKey();
-
-            if (
-                key == ConsoleKey.LeftArrow ||
-                key == ConsoleKey.RightArrow
-            )
+            while (true)
             {
-                selectedIndex =
+                string line =
                     selectedIndex == 0
-                        ? 1
-                        : 0;
+                        ? "> YES <     NO"
+                        : "YES     > NO <";
+
+                PresentWithSelection(line);
+
+                ConsoleKey key = ReadKey();
+
+                if (
+                    key == ConsoleKey.LeftArrow ||
+                    key == ConsoleKey.RightArrow
+                )
+                {
+                    selectedIndex =
+                        selectedIndex == 0
+                            ? 1
+                            : 0;
+                }
+                else if (key == ConsoleKey.Enter)
+                {
+                    return selectedIndex == 0;
+                }
             }
-            else if (key == ConsoleKey.Enter)
-            {
-                return selectedIndex == 0;
-            }
+        }
+        finally
+        {
+            insuranceQuestion = false;
         }
     }
 
@@ -745,62 +799,71 @@ class ConsoleUI
 
         int selectedIndex = 0;
 
+        SetCheatState(ref awaitingMove, true);
+
         FlushInput();
 
-        while (true)
+        try
         {
-            List<string> parts =
-                new List<string>();
-
-            for (int i = 0; i < options.Count; i++)
+            while (true)
             {
-                if (i == selectedIndex)
+                List<string> parts =
+                    new List<string>();
+
+                for (int i = 0; i < options.Count; i++)
                 {
-                    parts.Add(
-                        $"> {options[i].Label} <"
+                    if (i == selectedIndex)
+                    {
+                        parts.Add(
+                            $"> {options[i].Label} <"
+                        );
+                    }
+                    else
+                    {
+                        parts.Add(
+                            options[i].Label
+                        );
+                    }
+                }
+
+                string line =
+                    string.Join(
+                        "     ",
+                        parts
                     );
-                }
-                else
+
+                PresentWithSelection(line);
+
+                ConsoleKey key = ReadKey();
+
+                if (key == ConsoleKey.LeftArrow)
                 {
-                    parts.Add(
-                        options[i].Label
-                    );
+                    selectedIndex--;
+
+                    if (selectedIndex < 0)
+                    {
+                        selectedIndex =
+                            options.Count - 1;
+                    }
                 }
-            }
-
-            string line =
-                string.Join(
-                    "     ",
-                    parts
-                );
-
-            PresentWithSelection(line);
-
-            ConsoleKey key = ReadKey();
-
-            if (key == ConsoleKey.LeftArrow)
-            {
-                selectedIndex--;
-
-                if (selectedIndex < 0)
+                else if (key == ConsoleKey.RightArrow)
                 {
-                    selectedIndex =
-                        options.Count - 1;
-                }
-            }
-            else if (key == ConsoleKey.RightArrow)
-            {
-                selectedIndex++;
+                    selectedIndex++;
 
-                if (selectedIndex >= options.Count)
+                    if (selectedIndex >= options.Count)
+                    {
+                        selectedIndex = 0;
+                    }
+                }
+                else if (key == ConsoleKey.Enter)
                 {
-                    selectedIndex = 0;
+                    return options[selectedIndex].Value;
                 }
             }
-            else if (key == ConsoleKey.Enter)
-            {
-                return options[selectedIndex].Value;
-            }
+        }
+        finally
+        {
+            awaitingMove = false;
         }
     }
 
@@ -1215,14 +1278,19 @@ class ConsoleUI
     {
         AddFeltLine('=');
 
-        AddLine(
-            CenterText(
-                cheatEnabled
-                    ? CardCounter.GetSummaryLine(game, true)
-                    : "PLAYER",
-                TableWidth
-            )
-        );
+        if (cheatEnabled)
+        {
+            AddCheatLine(GetCheatAdvice(game));
+        }
+        else
+        {
+            AddLine(
+                CenterText(
+                    "PLAYER",
+                    TableWidth
+                )
+            );
+        }
 
         AddFeltLine('─');
 
@@ -1267,6 +1335,194 @@ class ConsoleUI
         }
 
         AddFeltLine('─');
+    }
+
+    // =========================================================
+    // CHEAT
+    // =========================================================
+
+    private void SetCheatState(ref bool state, bool value)
+    {
+        state = value;
+
+        if (cheatEnabled)
+        {
+            rebuildFrame?.Invoke();
+        }
+    }
+
+    private void AddCheatLine(string text)
+    {
+        AddLine(CheatColor + Fit(text, TableWidth) + DefaultColor);
+    }
+
+    private string GetCheatAdvice(Game game)
+    {
+        if (insuranceQuestion)
+        {
+            return CardCounter.GetInsuranceLine(game);
+        }
+
+        if (CardCounter.IsHandWaitingForMove(game))
+        {
+            return CardCounter.GetMoveLine(game);
+        }
+
+        return CardCounter.GetTrueCountMath(game, true);
+    }
+
+    private string GetCheatNote(Game game, bool betting)
+    {
+        if (betting)
+        {
+            return CardCounter.GetBetNote(game);
+        }
+
+        if (insuranceQuestion)
+        {
+            return CardCounter.GetInsuranceNote(game);
+        }
+
+        if (awaitingMove && CardCounter.IsHandWaitingForMove(game))
+        {
+            return CardCounter.GetCountNote(game);
+        }
+
+        if (lastCountedCard == null)
+        {
+            return "";
+        }
+
+        string cardLabel =
+            lastCountedCard.Rank + GetSuitSymbol(lastCountedCard.Suit);
+
+        return CardCounter.GetCardNote(
+            cardLabel,
+            lastCountedCard,
+            lastCardWasHoleCard,
+            game
+        );
+    }
+
+    private void TrackCountedCards(Game game)
+    {
+        List<Card> visible = CardCounter.GetVisibleTableCards(game);
+
+        if (visible.Count == 0)
+        {
+            seenCards.Clear();
+            lastCountedCard = null;
+
+            return;
+        }
+
+        bool newRound = seenCards.Any(card => !visible.Contains(card));
+
+        if (newRound)
+        {
+            seenCards.Clear();
+        }
+
+        Card? newest =
+            visible.LastOrDefault(card => !seenCards.Contains(card));
+
+        if (newest != null)
+        {
+            lastCountedCard = newest;
+            lastCardWasHoleCard = game.Dealer.Hand.Cards.IndexOf(newest) == 1;
+        }
+
+        seenCards = visible;
+    }
+
+    private void ShowCheatHelp()
+    {
+        string[] text =
+        [
+            "",
+            "Every card you see changes the running count:",
+            "  2 3 4 5 6 = +1    7 8 9 = 0    10 J Q K A = -1",
+            "",
+            "RC     Running count: all seen cards added up",
+            "TC     True count: RC ÷ decks left, rounded down",
+            "Decks  Cards not seen yet ÷ 52",
+            $"Edge   Your edge, estimated: {-0.4:0.0}% + {0.5:0.0}% per TC",
+            $"Bet    In credits. 1 unit = {0.5:0.0}% of your credits,",
+            "       1-8 units as the TC goes up",
+            "",
+            "High TC = more 10s and aces left: more blackjacks",
+            "(paid 3:2), better doubles, more dealer busts.",
+            "Low TC = the house has the edge, so bet small.",
+            "",
+            "PLAYER row: the best move and why. It uses basic",
+            "strategy, and the count changes some plays.",
+            "Box: the last card's count, or the count math.",
+            "The hole card counts when the dealer flips it.",
+            "",
+            "F1 = show this again    cheat + Enter = turn off",
+            "",
+            "Press any key to continue"
+        ];
+
+        const string title = " CARD COUNTING (HI-LO) ";
+
+        int innerWidth = HelpWidth - 2;
+        int titleLeft = (innerWidth - title.Length) / 2;
+
+        List<string> box =
+        [
+            "┌" +
+            new string('─', titleLeft) +
+            title +
+            new string('─', innerWidth - titleLeft - title.Length) +
+            "┐"
+        ];
+
+        foreach (string line in text)
+        {
+            string inner = line.StartsWith("Press")
+                ? CenterText(line, innerWidth)
+                : (" " + line).PadRight(innerWidth);
+
+            box.Add("│" + inner + "│");
+        }
+
+        box.Add("└" + new string('─', innerWidth) + "┘");
+
+        List<string> lines = new List<string>(frame);
+
+        while (lines.Count < HelpTopRow + box.Count)
+        {
+            lines.Add("");
+        }
+
+        for (int i = 0; i < box.Count; i++)
+        {
+            lines[HelpTopRow + i] =
+                CheatColor + CenterText(box[i], TableWidth) + DefaultColor;
+        }
+
+        Show(lines);
+
+        WaitForAnyKey();
+    }
+
+    private void WaitForAnyKey()
+    {
+        FlushInput();
+
+        while (!Console.KeyAvailable)
+        {
+            if (Screen.HasWindowResized())
+            {
+                EnsureWindowSize();
+                Screen.Present(shownLines, TableWidth);
+            }
+
+            Thread.Sleep(30);
+        }
+
+        Console.ReadKey(true);
     }
 
     // =========================================================
@@ -1440,6 +1696,20 @@ class ConsoleUI
                 cheatEnabled = !cheatEnabled;
 
                 rebuildFrame?.Invoke();
+
+                if (cheatEnabled)
+                {
+                    ShowCheatHelp();
+                }
+
+                return ConsoleKey.NoName;
+            }
+
+            if (keyInfo.Key == ConsoleKey.F1 && cheatEnabled)
+            {
+                typedLetters = "";
+
+                ShowCheatHelp();
 
                 return ConsoleKey.NoName;
             }
