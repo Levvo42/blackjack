@@ -9,6 +9,9 @@
 # Executable files
 /export*/
 
+# Private documentation
+/privatedocs/
+
 # User-specific files
 *.rsuser
 *.suo
