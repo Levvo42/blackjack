@@ -35,6 +35,14 @@ class ConsoleUI
     private readonly Dictionary<Hand, decimal> shownBets =
         new Dictionary<Hand, decimal>();
 
+    // CHEAT
+
+    private const string SecretCode = "cheat";
+
+    private bool cheatEnabled;
+    private string typedLetters = "";
+    private Action? rebuildFrame;
+
     // =========================================================
     // START / STOP
     // =========================================================
@@ -84,6 +92,8 @@ class ConsoleUI
         ];
 
         int selectedIndex = 0;
+
+        rebuildFrame = null;
 
         FlushInput();
 
@@ -155,13 +165,27 @@ class ConsoleUI
 
     public void ShowBettingScreen(Game game)
     {
+        rebuildFrame = () => BuildBettingScreen(game);
+
+        BuildBettingScreen(game);
+
+        PresentFrame();
+    }
+
+    private void BuildBettingScreen(Game game)
+    {
         StartFrame();
 
         ShowTableArea(game);
 
         AddFeltLine('=');
         AddLine(
-            CenterText("PLAYER", TableWidth)
+            CenterText(
+                cheatEnabled
+                    ? CardCounter.GetSummaryLine(game, false)
+                    : "PLAYER",
+                TableWidth
+            )
         );
         AddFeltLine('─');
 
@@ -173,8 +197,6 @@ class ConsoleUI
         );
 
         AddFeltLine('─');
-
-        PresentFrame();
     }
 
     public string GetBettingAction(Player player)
@@ -296,6 +318,8 @@ class ConsoleUI
         int selectedIndex = 0;
         decimal bet = 0;
 
+        rebuildFrame = null;
+
         FlushInput();
 
         while (true)
@@ -308,7 +332,9 @@ class ConsoleUI
 
             AddLine(
                 CenterText(
-                    "PLACE BET",
+                    cheatEnabled
+                        ? CardCounter.GetSummaryLine(game, false)
+                        : "PLACE BET",
                     TableWidth
                 )
             );
@@ -424,13 +450,20 @@ class ConsoleUI
 
     public void ShowBoard(Game game)
     {
+        rebuildFrame = () => BuildBoard(game);
+
+        BuildBoard(game);
+
+        PresentFrame();
+    }
+
+    private void BuildBoard(Game game)
+    {
         StartFrame();
 
         ShowTableArea(game);
 
         ShowPlayerStatus(game);
-
-        PresentFrame();
     }
 
     private void ShowTableArea(Game game)
@@ -1184,7 +1217,9 @@ class ConsoleUI
 
         AddLine(
             CenterText(
-                "PLAYER",
+                cheatEnabled
+                    ? CardCounter.GetSummaryLine(game, true)
+                    : "PLAYER",
                 TableWidth
             )
         );
@@ -1366,18 +1401,53 @@ class ConsoleUI
 
     private ConsoleKey ReadKey()
     {
-        while (!Console.KeyAvailable)
+        while (true)
         {
-            if (Screen.HasWindowResized())
+            while (!Console.KeyAvailable)
             {
-                EnsureWindowSize();
-                Screen.Present(shownLines, TableWidth);
+                if (Screen.HasWindowResized())
+                {
+                    EnsureWindowSize();
+                    Screen.Present(shownLines, TableWidth);
+                }
+
+                Thread.Sleep(30);
             }
 
-            Thread.Sleep(30);
-        }
+            ConsoleKeyInfo keyInfo = Console.ReadKey(true);
 
-        return Console.ReadKey(true).Key;
+            // SECRET CODE
+
+            if (char.IsLetter(keyInfo.KeyChar))
+            {
+                typedLetters += char.ToLower(keyInfo.KeyChar);
+
+                if (typedLetters.Length > SecretCode.Length)
+                {
+                    typedLetters =
+                        typedLetters[^SecretCode.Length..];
+                }
+
+                continue;
+            }
+
+            if (
+                keyInfo.Key == ConsoleKey.Enter &&
+                typedLetters == SecretCode
+            )
+            {
+                typedLetters = "";
+                cheatEnabled = !cheatEnabled;
+
+                rebuildFrame?.Invoke();
+
+                return ConsoleKey.NoName;
+            }
+
+            typedLetters = "";
+
+            return keyInfo.Key;
+        }
     }
 
     private static void FlushInput()
